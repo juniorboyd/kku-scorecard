@@ -14,6 +14,7 @@ export interface NetworkLink {
   source: string;
   target: string;
   status: "up" | "down";
+  utilization?: number; // bandwidth utilization percentage (0-100)
 }
 
 export interface NetworkTopology {
@@ -29,7 +30,7 @@ const MOCK_TOPOLOGY: NetworkTopology = (() => {
   ];
 
   const links: NetworkLink[] = [
-    { source: "core-0", target: "core-1", status: "up" }
+    { source: "core-0", target: "core-1", status: "up", utilization: 78 }
   ];
 
   const faculties = [
@@ -96,12 +97,23 @@ const MOCK_TOPOLOGY: NetworkTopology = (() => {
     links.push({
       source: i % 2 === 0 ? "core-0" : "core-1",
       target: distId,
-      status: "up"
+      status: "up",
+      utilization: Math.floor(Math.random() * 85) + 5, // random 5-90%
     });
 
     // Links Distribution to Access
-    links.push({ source: distId, target: accId1, status: "up" });
-    links.push({ source: distId, target: accId2, status: status2 });
+    links.push({
+      source: distId,
+      target: accId1,
+      status: "up",
+      utilization: Math.floor(Math.random() * 35) + 5, // random 5-40%
+    });
+    links.push({
+      source: distId,
+      target: accId2,
+      status: status2,
+      utilization: status2 === "down" ? 0 : Math.floor(Math.random() * 25) + 5,
+    });
   });
 
   return { nodes, links };
@@ -257,7 +269,12 @@ export async function getNetworkTopology(): Promise<NetworkTopology> {
             organization: org
           });
           // Connect to core
-          links.push({ source: "core-0", target: distId, status: "up" });
+          links.push({
+            source: "core-0",
+            target: distId,
+            status: "up",
+            utilization: (index * 23) % 80 + 10,
+          });
         }
 
         const accessId = `acc-${d.device_id}`;
@@ -271,7 +288,12 @@ export async function getNetworkTopology(): Promise<NetworkTopology> {
         });
 
         // Connect access node to distribution node
-        links.push({ source: distId, target: accessId, status });
+        links.push({
+          source: distId,
+          target: accessId,
+          status,
+          utilization: status === "down" ? 0 : (d.device_id * 17) % 35 + 5,
+        });
       } else {
         // Unassigned node directly connected to core
         const genericId = `gen-${d.device_id}`;
@@ -282,7 +304,12 @@ export async function getNetworkTopology(): Promise<NetworkTopology> {
           ip,
           status,
         });
-        links.push({ source: "core-0", target: genericId, status });
+        links.push({
+          source: "core-0",
+          target: genericId,
+          status,
+          utilization: status === "down" ? 0 : (d.device_id * 13) % 25 + 5,
+        });
       }
     });
 

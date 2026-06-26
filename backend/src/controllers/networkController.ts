@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { getNetworkTopology } from "../services/librenmsService.ts";
 
 export async function getTopologyHandler(req: Request, res: Response) {

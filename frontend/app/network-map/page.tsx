@@ -1,106 +1,212 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback, memo } from "react";
 import { useRouter } from "next/navigation";
-import { Network, Server, Router, HelpCircle, Activity, ZoomIn, ZoomOut, RefreshCw, AlertTriangle, ShieldCheck, ChevronRight, X, Search, Wifi } from "lucide-react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  Panel,
+  useNodesState,
+  useEdgesState,
+  useReactFlow,
+  ReactFlowProvider,
+  Handle,
+  Position,
+  Node as FlowNode,
+  Edge as FlowEdge,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import {
+  Network,
+  Server,
+  Router as RouterIcon,
+  Activity,
+  ZoomIn,
+  ZoomOut,
+  RefreshCw,
+  AlertTriangle,
+  ShieldCheck,
+  ChevronRight,
+  Search,
+  Wifi,
+} from "lucide-react";
 import { networkApi } from "@/lib/api";
 
 type NodeType = "core" | "distribution" | "access" | "server" | "router" | "firewall" | "wireless";
 
-interface Node {
+interface DeviceNode {
   id: string;
   label: string;
   type: NodeType;
   ip?: string;
   status: "up" | "down";
   organization?: string;
-  // Computed coordinates for rendering
   x?: number;
   y?: number;
 }
 
-interface Link {
+interface DeviceLink {
   source: string;
   target: string;
   status: "up" | "down";
+  utilization?: number;
 }
 
-export default function NetworkMapPage() {
+// 1. Custom Node Component
+const CustomNetworkNode = memo(({ data }: { data: any }) => {
+  const isDown = data.status === "down";
+  const isSelected = data.selected;
+
+  let colorClass = "bg-slate-500 fill-slate-500 text-slate-500 border-slate-500";
+  if (isDown) colorClass = "bg-rose-600 fill-rose-600 text-rose-600 border-rose-500";
+  else if (data.type === "core") colorClass = "bg-blue-600 fill-blue-600 text-blue-600 border-blue-500";
+  else if (data.type === "router") colorClass = "bg-indigo-600 fill-indigo-600 text-indigo-600 border-indigo-500";
+  else if (data.type === "distribution") colorClass = "bg-purple-600 fill-purple-600 text-purple-600 border-purple-500";
+  else if (data.type === "firewall") colorClass = "bg-rose-500 fill-rose-500 text-rose-500 border-rose-500";
+  else if (data.type === "wireless") colorClass = "bg-amber-500 fill-amber-500 text-amber-500 border-amber-500";
+  else if (data.type === "server") colorClass = "bg-teal-600 fill-teal-600 text-teal-600 border-teal-500";
+  else colorClass = "bg-sky-500 fill-sky-500 text-sky-500 border-sky-500";
+
+  const iconMap: Record<string, React.ReactNode> = {
+    core: <RouterIcon className="w-5 h-5 text-white" />,
+    router: <RouterIcon className="w-4 h-4 text-white" />,
+    distribution: <Network className="w-4 h-4 text-white" />,
+    firewall: <ShieldCheck className="w-3.5 h-3.5 text-white" />,
+    wireless: <Wifi className="w-3.5 h-3.5 text-white" />,
+    server: <Server className="w-3.5 h-3.5 text-white" />,
+    access: <Network className="w-3.5 h-3.5 text-white" />,
+  };
+
+  return (
+    <div className="relative flex flex-col items-center group">
+      <Handle type="target" position={Position.Top} className="opacity-0" />
+      
+      {/* Node Circle */}
+      <div
+        className={`w-12 h-12 rounded-full flex items-center justify-center border-2 bg-slate-950 transition-all duration-300 shadow-lg
+          ${isDown ? "border-rose-500 shadow-rose-950/40" : "border-slate-800 hover:border-slate-600"}
+          ${isSelected ? "ring-4 ring-blue-500/50 scale-105" : ""}
+        `}
+      >
+        <div className={`w-9 h-9 rounded-full flex items-center justify-center ${colorClass.split(" ")[0]} border border-white/20`}>
+          {iconMap[data.type] || <Network className="w-3.5 h-3.5 text-white" />}
+        </div>
+
+        {/* Pulse effect if Down */}
+        {isDown && (
+          <span className="absolute inset-0 rounded-full border-2 border-rose-500 animate-ping opacity-70 pointer-events-none" />
+        )}
+      </div>
+
+      {/* Expanded/Collapsed Badge */}
+      {data.type === "distribution" && (
+        <span
+          className={`absolute top-0 right-0 w-4 h-4 rounded-full border border-slate-950 flex items-center justify-center text-[9px] font-black text-white shadow-md select-none pointer-events-none
+            ${data.isExpanded ? "bg-amber-500" : "bg-blue-500"}
+          `}
+        >
+          {data.isExpanded ? "−" : "+"}
+        </span>
+      )}
+
+      {/* Label Text */}
+      <div className="mt-2 text-center max-w-[130px] pointer-events-none select-none">
+        <p className="text-[10px] font-black text-slate-200 group-hover:text-white truncate drop-shadow-md">
+          {data.type === "distribution" && data.organization
+            ? data.organization.replace("คณะ", "")
+            : data.label.split(".")[0]}
+        </p>
+        {data.ip && (
+          <p className="text-[8px] text-slate-500 font-mono mt-0.5 truncate">{data.ip}</p>
+        )}
+      </div>
+
+      <Handle type="source" position={Position.Bottom} className="opacity-0" />
+    </div>
+  );
+});
+CustomNetworkNode.displayName = "CustomNetworkNode";
+
+const nodeTypes = {
+  customNode: CustomNetworkNode,
+};
+
+// 2. Inner Component with React Flow Context access
+function NetworkTopologyFlow() {
   const router = useRouter();
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [links, setLinks] = useState<Link[]>([]);
+  const { zoomIn, zoomOut, setViewport } = useReactFlow();
+
+  const [rawNodes, setRawNodes] = useState<DeviceNode[]>([]);
+  const [rawLinks, setRawLinks] = useState<DeviceLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [selectedNode, setSelectedNode] = useState<DeviceNode | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "up" | "down">("all");
   const [groupBy, setGroupBy] = useState<"none" | "type" | "org">("none");
   const [selectedOrgFilter, setSelectedOrgFilter] = useState<string>("all");
 
-  // SVG Pan & Zoom State
-  const [scale, setScale] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0 });
+  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
 
-  const loadTopology = () => {
-    setLoading(true);
-    setError(false);
-    networkApi.getTopology()
-      .then((r) => {
-        if (r.success && r.data) {
-          computeCoordinates(r.data.nodes, r.data.links);
-        } else {
-          setError(true);
-        }
-      })
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
-  };
+  // Compute node coordinates using concentric tree layout
+  const computeCoordinates = useCallback((devices: DeviceNode[], links: DeviceLink[], expanded: Set<string>, orgFilter: string) => {
+    const cx = 600;
+    const cy = 400;
 
-  useEffect(() => {
-    loadTopology();
-  }, []);
+    // Filter node visibility
+    const isNodeVisible = (node: DeviceNode): boolean => {
+      if (orgFilter !== "all") {
+        if (node.type === "core") return true;
+        if (node.organization !== orgFilter) return false;
+      }
+      if (node.type === "core" || node.type === "distribution") return true;
 
-  // Compute node coordinates dynamically using a concentric tree layout
-  const computeCoordinates = (rawNodes: Node[], rawLinks: Link[]) => {
-    const width = 1200;
-    const height = 800;
-    const cx = width / 2;
-    const cy = height / 2;
+      // Find connection to parent
+      const parentLink = links.find((l) => l.target === node.id);
+      if (!parentLink) return true;
 
-    const coreNodes = rawNodes.filter((n) => n.type === "core");
-    const distNodes = rawNodes.filter((n) => n.type === "distribution");
-    const accessNodes = rawNodes.filter((n) => n.type === "access" || n.type === "server");
+      const parentNode = devices.find((n) => n.id === parentLink.source);
+      if (parentNode && parentNode.type === "distribution") {
+        return expanded.has(parentNode.id);
+      }
+      return true;
+    };
 
-    // 1. Position Core Nodes in the absolute center
+    // Calculate layout coordinates
+    const coreNodes = devices.filter((n) => n.type === "core");
+    const distNodes = devices.filter((n) => n.type === "distribution" && isNodeVisible(n));
+    const accessNodes = devices.filter((n) => (n.type === "access" || n.type === "server" || n.type === "router" || n.type === "firewall" || n.type === "wireless") && isNodeVisible(n));
+
+    // 1. Core Nodes
     coreNodes.forEach((node, i) => {
       if (coreNodes.length === 1) {
         node.x = cx;
         node.y = cy;
       } else {
-        const offset = 60;
+        const offset = 80;
         const angle = (i * 2 * Math.PI) / coreNodes.length;
         node.x = cx + Math.cos(angle) * offset;
         node.y = cy + Math.sin(angle) * offset;
       }
     });
 
-    // 2. Position Distribution (Faculty) Nodes in a circle around the center
-    const distRadius = 220;
+    // 2. Distribution Nodes
+    const distRadius = 260;
     distNodes.forEach((node, i) => {
       const angle = (i * 2 * Math.PI) / distNodes.length;
       node.x = cx + Math.cos(angle) * distRadius;
       node.y = cy + Math.sin(angle) * distRadius;
     });
 
-    // 3. Position Access Nodes near their respective parent Distribution Nodes
-    // Group access nodes by their parent node
-    const parentMap = new Map<string, Node[]>();
-    rawLinks.forEach((link) => {
-      const parent = rawNodes.find((n) => n.id === link.source);
-      const child = rawNodes.find((n) => n.id === link.target);
-      if (parent && child && (parent.type === "distribution" || parent.type === "core") && (child.type === "access" || child.type === "server")) {
+    // 3. Position Access Nodes grouped by parent
+    const parentMap = new Map<string, DeviceNode[]>();
+    links.forEach((link) => {
+      const parent = devices.find((n) => n.id === link.source);
+      const child = devices.find((n) => n.id === link.target && isNodeVisible(n));
+      if (parent && child && (parent.type === "distribution" || parent.type === "core")) {
         const list = parentMap.get(parent.id) ?? [];
         list.push(child);
         parentMap.set(parent.id, list);
@@ -108,67 +214,159 @@ export default function NetworkMapPage() {
     });
 
     parentMap.forEach((children, parentId) => {
-      const parent = rawNodes.find((n) => n.id === parentId);
+      const parent = devices.find((n) => n.id === parentId);
       if (!parent || parent.x === undefined || parent.y === undefined) return;
 
-      // Find the angle of the parent from center
       const parentAngle = Math.atan2(parent.y - cy, parent.x - cx);
-      const childRadiusOffset = 110;
+      const childRadiusOffset = 130;
 
       children.forEach((child, i) => {
-        // Distribute children in a small fan arc extending outwards from parent
-        const arcWidth = Math.PI / 4; // 45 degree spread
+        const arcWidth = Math.PI / 2.5; // Wider spread (about 72 degrees)
         const startAngle = parentAngle - arcWidth / 2;
         const angleStep = children.length > 1 ? arcWidth / (children.length - 1) : 0;
         const childAngle = startAngle + i * angleStep;
 
-        child.x = parent.x! + Math.cos(childAngle) * childRadiusOffset;
-        child.y = parent.y! + Math.sin(childAngle) * childRadiusOffset;
+        // Stagger access nodes to prevent overlapping in dense groups
+        const staggerOffset = i % 2 === 0 ? 0 : 55;
+        const dynamicOffset = childRadiusOffset + staggerOffset;
+
+        child.x = parent.x! + Math.cos(childAngle) * dynamicOffset;
+        child.y = parent.y! + Math.sin(childAngle) * dynamicOffset;
       });
     });
 
     // Handle generic access nodes (connected directly to core)
-    const genericAccess = accessNodes.filter((n) => !rawLinks.some((l) => l.target === n.id && rawNodes.find((pn) => pn.id === l.source && pn.type === "distribution")));
-    const genericRadius = 380;
+    const genericAccess = accessNodes.filter(
+      (n) => !links.some((l) => l.target === n.id && devices.some((pn) => pn.id === l.source && pn.type === "distribution"))
+    );
+    
+    // Distribute unassigned generic nodes across multiple concentric rings to avoid overlap
+    const nodesPerRing = [18, 28, 38, 48];
     genericAccess.forEach((node, i) => {
-      const angle = (i * 2 * Math.PI) / (genericAccess.length || 1) + Math.PI / 8;
-      node.x = cx + Math.cos(angle) * genericRadius;
-      node.y = cy + Math.sin(angle) * genericRadius;
+      let cumulative = 0;
+      let ring = 0;
+      for (let r = 0; r < nodesPerRing.length; r++) {
+        cumulative += nodesPerRing[r];
+        if (i < cumulative) {
+          ring = r;
+          break;
+        }
+        if (r === nodesPerRing.length - 1) {
+          ring = r;
+        }
+      }
+
+      const ringRadius = 390 + ring * 90;
+      const ringStartIdx = ring > 0 ? nodesPerRing.slice(0, ring).reduce((a, b) => a + b, 0) : 0;
+      const ringEndIdx = Math.min(genericAccess.length, ringStartIdx + nodesPerRing[ring]);
+      const totalInRing = ringEndIdx - ringStartIdx;
+      
+      const idxInRing = i - ringStartIdx;
+      const staggerAngle = (ring * Math.PI) / 8;
+      const angle = (idxInRing * 2 * Math.PI) / (totalInRing || 1) + staggerAngle;
+
+      node.x = cx + Math.cos(angle) * ringRadius;
+      node.y = cy + Math.sin(angle) * ringRadius;
     });
 
-    setNodes(rawNodes);
-    setLinks(rawLinks);
-  };
+    // Generate React Flow Nodes
+    const flowNodes: FlowNode[] = devices
+      .filter(isNodeVisible)
+      .map((node) => ({
+        id: node.id,
+        type: "customNode",
+        position: { x: node.x ?? cx, y: node.y ?? cy },
+        data: {
+          label: node.label,
+          type: node.type,
+          ip: node.ip,
+          status: node.status,
+          organization: node.organization,
+          isExpanded: expanded.has(node.id),
+        },
+      }));
 
-  // Zoom & Pan Handlers
-  const handleMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (e.button !== 0) return; // Only left click
-    setIsDragging(true);
-    dragStart.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
-  };
+    // Generate React Flow Edges
+    const flowEdges: FlowEdge[] = links
+      .filter((link) => {
+        const sourceNode = devices.find((n) => n.id === link.source);
+        const targetNode = devices.find((n) => n.id === link.target);
+        return sourceNode && targetNode && isNodeVisible(sourceNode) && isNodeVisible(targetNode);
+      })
+      .map((link) => {
+        const isDown = link.status === "down";
+        const utilization = link.utilization ?? 0;
 
-  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (!isDragging) return;
-    setPan({
-      x: e.clientX - dragStart.current.x,
-      y: e.clientY - dragStart.current.y
-    });
-  };
+        // Bandwidth utilization colors (Weathermap style)
+        let strokeColor = "#475569"; // Under 10% (Grey)
+        if (isDown) {
+          strokeColor = "#ef4444"; // Red for Down links
+        } else if (utilization >= 80) {
+          strokeColor = "#f43f5e"; // Pinkish Red (Over 80%)
+        } else if (utilization >= 50) {
+          strokeColor = "#f59e0b"; // Orange/Yellow (50-80%)
+        } else if (utilization >= 10) {
+          strokeColor = "#10b981"; // Green (10-50%)
+        }
 
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
+        return {
+          id: `edge-${link.source}-${link.target}`,
+          source: link.source,
+          target: link.target,
+          animated: !isDown && utilization > 10,
+          style: {
+            stroke: strokeColor,
+            strokeWidth: isDown ? 2.5 : (utilization >= 80 ? 3 : (utilization >= 50 ? 2 : 1.5)),
+          },
+        };
+      });
 
-  const zoom = (factor: number) => {
-    setScale((prev) => Math.max(0.4, Math.min(3, prev * factor)));
-  };
+    setNodes(flowNodes);
+    setEdges(flowEdges);
+  }, [setNodes, setEdges]);
 
-  const resetView = () => {
-    setScale(1);
-    setPan({ x: 0, y: 0 });
-  };
+  // Load live data from topology API
+  const loadTopology = useCallback(() => {
+    setLoading(true);
+    setError(false);
+    networkApi
+      .getTopology()
+      .then((r) => {
+        if (r.success && r.data) {
+          setRawNodes(r.data.nodes);
+          setRawLinks(r.data.links);
+          computeCoordinates(r.data.nodes, r.data.links, expandedNodes, selectedOrgFilter);
+        } else {
+          setError(true);
+        }
+      })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }, [computeCoordinates, expandedNodes, selectedOrgFilter]);
 
-  // Toggle node children expansion
+  useEffect(() => {
+    loadTopology();
+  }, []);
+
+  // Update layout when expansion state or organization filter changes
+  useEffect(() => {
+    if (rawNodes.length > 0) {
+      computeCoordinates(rawNodes, rawLinks, expandedNodes, selectedOrgFilter);
+    }
+  }, [expandedNodes, selectedOrgFilter, rawNodes, rawLinks, computeCoordinates]);
+
+  // Automatic expansion of filtered organization
+  useEffect(() => {
+    if (selectedOrgFilter !== "all") {
+      const targetNode = rawNodes.find(
+        (n) => n.type === "distribution" && n.organization === selectedOrgFilter
+      );
+      if (targetNode) {
+        setExpandedNodes(new Set([targetNode.id]));
+      }
+    }
+  }, [selectedOrgFilter, rawNodes]);
+
   const toggleNodeExpansion = (nodeId: string) => {
     setExpandedNodes((prev) => {
       const next = new Set(prev);
@@ -181,49 +379,25 @@ export default function NetworkMapPage() {
     });
   };
 
-  // Automatically expand the selected faculty's node when filtered
-  useEffect(() => {
-    if (selectedOrgFilter !== "all") {
-      const targetNode = nodes.find(n => n.type === "distribution" && n.organization === selectedOrgFilter);
-      if (targetNode) {
-        setExpandedNodes(new Set([targetNode.id]));
+  const handleNodeClick = useCallback(
+    (_event: React.MouseEvent, flowNode: FlowNode) => {
+      const match = rawNodes.find((n) => n.id === flowNode.id);
+      if (match) {
+        setSelectedNode(match);
+        if (match.type === "distribution") {
+          toggleNodeExpansion(match.id);
+        }
       }
-    }
-  }, [selectedOrgFilter, nodes]);
+    },
+    [rawNodes]
+  );
 
-  // Check if a node should be visible
-  const isNodeVisible = (node: Node): boolean => {
-    // If filtering by organization/faculty
-    if (selectedOrgFilter !== "all") {
-      if (node.type === "core") return true;
-      if (node.organization !== selectedOrgFilter) return false;
-    }
-
-    if (node.type === "core" || node.type === "distribution") return true;
-
-    // Find the link connecting this node to its parent
-    const link = links.find((l) => l.target === node.id);
-    if (!link) return true; // Show orphan nodes
-
-    // If parent is a distribution node, only show if parent is expanded
-    const parentNode = nodes.find((n) => n.id === link.source);
-    if (parentNode && parentNode.type === "distribution") {
-      return expandedNodes.has(parentNode.id);
-    }
-
-    return true;
+  const resetView = () => {
+    setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 400 });
   };
 
-  // Filter visible items
-  const visibleNodes = nodes.filter(isNodeVisible);
-  const visibleLinks = links.filter((link) => {
-    const sourceNode = nodes.find((n) => n.id === link.source);
-    const targetNode = nodes.find((n) => n.id === link.target);
-    return sourceNode && targetNode && isNodeVisible(sourceNode) && isNodeVisible(targetNode);
-  });
-
   const organizations = Array.from(
-    new Set(nodes.map((n) => n.organization).filter(Boolean))
+    new Set(rawNodes.map((n) => n.organization).filter(Boolean))
   ) as string[];
 
   return (
@@ -232,17 +406,33 @@ export default function NetworkMapPage() {
       <div className="flex-1 card p-0 flex flex-col relative overflow-hidden bg-slate-900 border border-slate-800">
         {/* Toolbar Overlay */}
         <div className="absolute top-4 left-4 z-10 flex gap-2 items-center">
-          <button onClick={() => zoom(1.2)} className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 backdrop-blur transition-all" title="Zoom In">
+          <button
+            onClick={() => zoomIn({ duration: 300 })}
+            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 backdrop-blur transition-all"
+            title="Zoom In"
+          >
             <ZoomIn className="w-4 h-4" />
           </button>
-          <button onClick={() => zoom(0.8)} className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 backdrop-blur transition-all" title="Zoom Out">
+          <button
+            onClick={() => zoomOut({ duration: 300 })}
+            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 backdrop-blur transition-all"
+            title="Zoom Out"
+          >
             <ZoomOut className="w-4 h-4" />
           </button>
-          <button onClick={resetView} className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 backdrop-blur transition-all text-xs font-bold" title="Reset View">
+          <button
+            onClick={resetView}
+            className="px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 backdrop-blur transition-all text-xs font-bold"
+            title="Reset View"
+          >
             Reset
           </button>
-          <button onClick={loadTopology} className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 backdrop-blur transition-all" title="Refresh Live Data">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <button
+            onClick={loadTopology}
+            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 backdrop-blur transition-all"
+            title="Refresh Live Data"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </button>
 
           {/* Faculty Filter Dropdown */}
@@ -251,7 +441,9 @@ export default function NetworkMapPage() {
             onChange={(e) => setSelectedOrgFilter(e.target.value)}
             className="px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 backdrop-blur transition-all text-xs font-bold outline-none cursor-pointer"
           >
-            <option value="all" className="bg-slate-900 text-slate-200">ทุกคณะ/หน่วยงานทั้งหมด</option>
+            <option value="all" className="bg-slate-900 text-slate-200">
+              ทุกคณะ/หน่วยงานทั้งหมด
+            </option>
             {organizations.sort().map((org) => (
               <option key={org} value={org} className="bg-slate-900 text-slate-200">
                 {org}
@@ -261,17 +453,29 @@ export default function NetworkMapPage() {
         </div>
 
         {/* Legend Overlay */}
-        <div className="absolute bottom-4 left-4 z-10 bg-slate-800/90 border border-slate-700/80 p-4 rounded-2xl text-xs text-slate-300 space-y-2 backdrop-blur max-w-xs shadow-xl">
+        <div className="absolute bottom-4 left-4 z-10 bg-slate-800/90 border border-slate-700/80 p-4 rounded-2xl text-xs text-slate-300 space-y-2 backdrop-blur max-w-xs shadow-xl pointer-events-auto">
           <h4 className="font-extrabold text-slate-100 flex items-center gap-1.5 border-b border-slate-700 pb-1.5 mb-2">
             <Activity className="w-3.5 h-3.5 text-blue-400" /> แผนผังเครือข่ายระดับโครงสร้าง
           </h4>
           <div className="grid grid-cols-2 gap-2 text-[10px]">
-            <div className="flex items-center gap-1.5"><Router className="w-3.5 h-3.5 text-blue-500" /> Core Router</div>
-            <div className="flex items-center gap-1.5"><Network className="w-3.5 h-3.5 text-purple-500" /> Dist Switch</div>
-            <div className="flex items-center gap-1.5"><Network className="w-3.5 h-3.5 text-sky-500" /> Access Switch</div>
-            <div className="flex items-center gap-1.5"><Server className="w-3.5 h-3.5 text-teal-500" /> Server Node</div>
-            <div className="flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5 text-red-500" /> Firewall</div>
-            <div className="flex items-center gap-1.5"><Wifi className="w-3.5 h-3.5 text-amber-500" /> Wireless WLC</div>
+            <div className="flex items-center gap-1.5">
+              <RouterIcon className="w-3.5 h-3.5 text-blue-500" /> Core Router
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Network className="w-3.5 h-3.5 text-purple-500" /> Dist Switch
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Network className="w-3.5 h-3.5 text-sky-500" /> Access Switch
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Server className="w-3.5 h-3.5 text-teal-500" /> Server Node
+            </div>
+            <div className="flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-rose-500" /> Firewall
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Wifi className="w-3.5 h-3.5 text-amber-500" /> Wireless WLC
+            </div>
           </div>
           <div className="border-t border-slate-700/80 pt-2 flex justify-between gap-4 mt-2">
             <div className="flex items-center gap-1.5">
@@ -279,189 +483,82 @@ export default function NetworkMapPage() {
               <span>ออนไลน์ (Up)</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse inline-block" />
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse inline-block" />
               <span>ขัดข้อง (Down)</span>
             </div>
           </div>
-          <p className="text-[10px] text-slate-500 pt-1">คลิกที่โหนดคณะเพื่อกาง/หุบสวิตช์ย่อยออกได้</p>
+          
+          <div className="border-t border-slate-700/80 pt-2 space-y-1">
+            <p className="font-bold text-[10px] text-slate-400">อัตราการใช้งานลิงก์ (Weathermap)</p>
+            <div className="grid grid-cols-2 gap-1 text-[9px]">
+              <div className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-rose-500 inline-block" /> สูงมาก (&gt;80%)</div>
+              <div className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-amber-500 inline-block" /> ปานกลาง (50-80%)</div>
+              <div className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-500 inline-block" /> ต่ำ (10-50%)</div>
+              <div className="flex items-center gap-1"><span className="w-2 h-2 rounded bg-slate-500 inline-block" /> ไม่มีโหลด (&lt;10%)</div>
+            </div>
+          </div>
+
+          <p className="text-[10px] text-slate-500 pt-1">
+            คลิกที่โหนดคณะเพื่อกาง/หุบสวิตช์ย่อยออกได้
+          </p>
         </div>
 
         {loading ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3">
             <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-slate-400 text-sm font-semibold animate-pulse">กำลังโหลดแผนผังเครือข่าย...</p>
+            <p className="text-slate-400 text-sm font-semibold animate-pulse">
+              กำลังโหลดแผนผังเครือข่าย...
+            </p>
           </div>
         ) : error ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-4">
-            <AlertTriangle className="w-12 h-12 text-red-500 animate-bounce" />
+            <AlertTriangle className="w-12 h-12 text-rose-500 animate-bounce" />
             <div className="text-center">
               <p className="text-slate-200 font-extrabold">ดึงข้อมูลเครือข่ายล้มเหลว</p>
-              <p className="text-slate-500 text-xs mt-1">กรุณาลองใหม่อีกครั้ง หรือตรวจสอบสิทธิ์การเข้าถึง LibreNMS API</p>
+              <p className="text-slate-500 text-xs mt-1">
+                กรุณาลองใหม่อีกครั้ง หรือตรวจสอบสิทธิ์การเข้าถึง LibreNMS API
+              </p>
             </div>
-            <button onClick={loadTopology} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl text-xs transition-colors">
+            <button
+              onClick={loadTopology}
+              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl text-xs transition-colors"
+            >
               <RefreshCw className="w-3.5 h-3.5" />
               โหลดอีกครั้ง
             </button>
           </div>
         ) : (
-          <svg
-            className={`w-full h-full ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-          >
-            <defs>
-              <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.15" />
-                <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
-              </radialGradient>
-            </defs>
-
-            {/* Background glowing circle for central node */}
-            <circle cx={600} cy={400} r={420} fill="url(#glow)" />
-
-            <g transform={`translate(${pan.x}, ${pan.y}) scale(${scale})`}>
-              {/* Lines / Links */}
-              {visibleLinks.map((link, i) => {
-                const sNode = nodes.find((n) => n.id === link.source);
-                const tNode = nodes.find((n) => n.id === link.target);
-                if (!sNode || !tNode || sNode.x === undefined || tNode.x === undefined) return null;
-
-                const isDown = link.status === "down";
-
-                return (
-                  <line
-                    key={i}
-                    x1={sNode.x}
-                    y1={sNode.y}
-                    x2={tNode.x}
-                    y2={tNode.y}
-                    stroke={isDown ? "#f43f5e" : "#475569"}
-                    strokeWidth={isDown ? 2.5 : 1.5}
-                    strokeDasharray={isDown ? "4 4" : "0"}
-                    className="transition-all"
-                  />
-                );
-              })}
-
-              {/* Nodes */}
-              {visibleNodes.map((node) => {
-                if (node.x === undefined || node.y === undefined) return null;
-
-                const isDown = node.status === "down";
-                const isSelected = selectedNode?.id === node.id;
-                const isExpanded = expandedNodes.has(node.id);
-
-                // Node type colors
-                let colorClass = "bg-slate-500 fill-slate-500";
-                if (isDown) colorClass = "bg-rose-600 fill-rose-600";
-                else if (node.type === "core") colorClass = "bg-blue-600 fill-blue-600";
-                else if (node.type === "router") colorClass = "bg-indigo-600 fill-indigo-600";
-                else if (node.type === "distribution") colorClass = "bg-purple-600 fill-purple-600";
-                else if (node.type === "firewall") colorClass = "bg-rose-500 fill-rose-500";
-                else if (node.type === "wireless") colorClass = "bg-amber-500 fill-amber-500";
-                else if (node.type === "server") colorClass = "bg-teal-600 fill-teal-600";
-                else colorClass = "bg-sky-500 fill-sky-500";
-
-                const radius = node.type === "core" ? 22 : node.type === "distribution" ? 18 : 12;
-                const iconSize = node.type === "core" ? 28 : node.type === "distribution" ? 24 : 18;
-                const iconOffset = -iconSize / 2;
-
-                return (
-                  <g
-                    key={node.id}
-                    transform={`translate(${node.x}, ${node.y})`}
-                    className="cursor-pointer group"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedNode(node);
-                      if (node.type === "distribution") {
-                        toggleNodeExpansion(node.id);
-                      }
-                    }}
-                  >
-                    {/* Glowing outer ring if selected */}
-                    {isSelected && (
-                      <circle
-                        r={radius + 8}
-                        className="fill-transparent stroke-blue-400 stroke-2 animate-ping opacity-60"
-                      />
-                    )}
-
-                    {/* Glowing outer ring if down */}
-                    {isDown && (
-                      <circle
-                        r={radius + 6}
-                        className="fill-transparent stroke-rose-500 stroke-[1.5px] animate-pulse opacity-80"
-                      />
-                    )}
-
-                    {/* Outer Ring */}
-                    <circle
-                      r={radius + 4}
-                      className="fill-slate-950 stroke-slate-800 group-hover:stroke-slate-600 transition-colors"
-                      strokeWidth={1.5}
-                    />
-
-                    {/* Main Node Circle */}
-                    <circle
-                      r={radius}
-                      className={`${colorClass} stroke-white`}
-                      strokeWidth={1.5}
-                    />
-
-                    {/* Centered Device Icon */}
-                    <foreignObject
-                      x={iconOffset}
-                      y={iconOffset}
-                      width={iconSize}
-                      height={iconSize}
-                      style={{ pointerEvents: 'none' }}
-                    >
-                      <div className="w-full h-full flex items-center justify-center text-white">
-                        {node.type === "core" && <Router className="w-4 h-4" />}
-                        {node.type === "router" && <Router className="w-3.5 h-3.5" />}
-                        {node.type === "distribution" && <Network className="w-3.5 h-3.5" />}
-                        {node.type === "firewall" && <ShieldCheck className="w-3 h-3" />}
-                        {node.type === "wireless" && <Wifi className="w-3 h-3" />}
-                        {node.type === "server" && <Server className="w-3 h-3" />}
-                        {node.type === "access" && <Network className="w-3 h-3" />}
-                      </div>
-                    </foreignObject>
-
-                    {/* Expanded/Collapsed indicator for Distribution Switch */}
-                    {node.type === "distribution" && (
-                      <circle
-                        r={5}
-                        cx={radius}
-                        cy={-radius}
-                        fill={isExpanded ? "#f59e0b" : "#3b82f6"}
-                        stroke="#fff"
-                        strokeWidth={1}
-                      />
-                    )}
-
-                    {/* Label Text */}
-                    <text
-                      y={radius + 18}
-                      textAnchor="middle"
-                      className="text-[10px] font-bold fill-slate-300 group-hover:fill-white font-mono select-none drop-shadow-md"
-                    >
-                      {node.type === "distribution" && node.organization
-                        ? node.organization.replace("คณะ", "")
-                        : node.label.split(".")[0]}
-                    </text>
-                  </g>
-                );
-              })}
-            </g>
-          </svg>
+          <div className="w-full h-full flex-1">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={handleNodeClick}
+              nodeTypes={nodeTypes}
+              fitView
+              minZoom={0.2}
+              maxZoom={2.5}
+            >
+              <Background color="#334155" gap={16} size={1} />
+              <MiniMap
+                bgColor="#0f172a"
+                nodeColor={(node) => {
+                  if (node.data?.status === "down") return "#ef4444";
+                  if (node.data?.type === "core") return "#2563eb";
+                  if (node.data?.type === "distribution") return "#8b5cf6";
+                  return "#475569";
+                }}
+                maskColor="rgba(15, 23, 42, 0.6)"
+                style={{ height: 100, width: 150 }}
+              />
+            </ReactFlow>
+          </div>
         )}
       </div>
 
       {/* Side Detail Inspector Panel */}
-      <div className="w-80 flex flex-col gap-4">
+      <div className="w-80 flex flex-col gap-4 shrink-0">
         <div className="card p-5 flex flex-col flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden">
           {selectedNode ? (
             <div className="flex-1 flex flex-col overflow-hidden">
@@ -476,7 +573,9 @@ export default function NetworkMapPage() {
               {/* Panel Header */}
               <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3 mb-4">
                 <div>
-                  <h3 className="font-extrabold text-slate-800 dark:text-slate-100 break-all pr-2">{selectedNode.label}</h3>
+                  <h3 className="font-extrabold text-slate-800 dark:text-slate-100 break-all pr-2">
+                    {selectedNode.label}
+                  </h3>
                   <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 px-2 py-0.5 rounded-full font-bold uppercase mt-1 inline-block">
                     {selectedNode.type} Node
                   </span>
@@ -484,17 +583,23 @@ export default function NetworkMapPage() {
               </div>
 
               {/* Status Section */}
-              <div className={`p-4 rounded-xl border mb-5 flex items-center justify-between ${
-                selectedNode.status === 'up'
-                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400'
-                  : 'bg-rose-500/10 border-rose-500/20 text-rose-700 dark:text-rose-400'
-              }`}>
+              <div
+                className={`p-4 rounded-xl border mb-5 flex items-center justify-between ${
+                  selectedNode.status === "up"
+                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                    : "bg-rose-500/10 border-rose-500/20 text-rose-700 dark:text-rose-400"
+                }`}
+              >
                 <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full animate-ping ${selectedNode.status === 'up' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                  <span
+                    className={`w-2 h-2 rounded-full animate-ping ${
+                      selectedNode.status === "up" ? "bg-emerald-500" : "bg-rose-500"
+                    }`}
+                  />
                   <span className="font-bold text-xs uppercase">สถานะอุปกรณ์</span>
                 </div>
                 <span className="font-mono text-sm font-extrabold uppercase">
-                  {selectedNode.status === 'up' ? 'ONLINE' : 'DOWN / ERROR'}
+                  {selectedNode.status === "up" ? "ONLINE" : "DOWN / ERROR"}
                 </span>
               </div>
 
@@ -503,17 +608,23 @@ export default function NetworkMapPage() {
                 {selectedNode.ip && (
                   <div>
                     <span className="text-slate-400 block font-semibold">IP Address</span>
-                    <span className="text-slate-700 dark:text-slate-200 font-mono font-bold text-sm">{selectedNode.ip}</span>
+                    <span className="text-slate-700 dark:text-slate-200 font-mono font-bold text-sm">
+                      {selectedNode.ip}
+                    </span>
                   </div>
                 )}
                 {selectedNode.organization && (
                   <div>
                     <span className="text-slate-400 block font-semibold">หน่วยงานที่สังกัด</span>
-                    <span className="text-slate-700 dark:text-slate-200 font-bold">{selectedNode.organization}</span>
+                    <span className="text-slate-700 dark:text-slate-200 font-bold">
+                      {selectedNode.organization}
+                    </span>
                   </div>
                 )}
                 <div>
-                  <span className="text-slate-400 block font-semibold">ระดับชั้นโครงสร้าง (Layer)</span>
+                  <span className="text-slate-400 block font-semibold">
+                    ระดับชั้นโครงสร้าง (Layer)
+                  </span>
                   <span className="text-slate-700 dark:text-slate-200 capitalize font-bold">
                     {selectedNode.type === "core" && "แกนหลัก (Core Layer)"}
                     {selectedNode.type === "distribution" && "กระจายสัญญาณ (Distribution)"}
@@ -537,7 +648,7 @@ export default function NetworkMapPage() {
             <div className="flex-1 flex flex-col overflow-hidden">
               <h3 className="font-extrabold text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-1.5">
                 <Network className="w-4 h-4 text-blue-500" />
-                รายการอุปกรณ์ ({nodes.length})
+                รายการอุปกรณ์ ({rawNodes.length})
               </h3>
 
               {/* Search Bar */}
@@ -556,19 +667,27 @@ export default function NetworkMapPage() {
               <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl mb-3 text-xs font-bold text-center">
                 <button
                   onClick={() => setStatusFilter("all")}
-                  className={`py-1.5 rounded-lg transition-colors ${statusFilter === "all" ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                  className={`py-1.5 rounded-lg transition-colors ${
+                    statusFilter === "all"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm"
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
                 >
                   ทั้งหมด
                 </button>
                 <button
                   onClick={() => setStatusFilter("up")}
-                  className={`py-1.5 rounded-lg transition-colors ${statusFilter === "up" ? "bg-emerald-500 text-white shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                  className={`py-1.5 rounded-lg transition-colors ${
+                    statusFilter === "up" ? "bg-emerald-500 text-white shadow-sm" : "text-slate-500 hover:text-slate-800"
+                  }`}
                 >
                   Online
                 </button>
                 <button
                   onClick={() => setStatusFilter("down")}
-                  className={`py-1.5 rounded-lg transition-colors ${statusFilter === "down" ? "bg-rose-500 text-white shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
+                  className={`py-1.5 rounded-lg transition-colors ${
+                    statusFilter === "down" ? "bg-rose-500 text-white shadow-sm" : "text-slate-500 hover:text-slate-800"
+                  }`}
                 >
                   Offline
                 </button>
@@ -578,17 +697,46 @@ export default function NetworkMapPage() {
               <div className="flex items-center justify-between mb-3 text-[11px] font-bold text-slate-400">
                 <span>จัดกลุ่มตาม:</span>
                 <div className="flex gap-1.5">
-                  <button onClick={() => setGroupBy("none")} className={`px-2 py-0.5 rounded transition-all ${groupBy === 'none' ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 hover:bg-slate-200'}`}>ไม่มี</button>
-                  <button onClick={() => setGroupBy("type")} className={`px-2 py-0.5 rounded transition-all ${groupBy === 'type' ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 hover:bg-slate-200'}`}>ประเภท</button>
-                  <button onClick={() => setGroupBy("org")} className={`px-2 py-0.5 rounded transition-all ${groupBy === 'org' ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 hover:bg-slate-200'}`}>หน่วยงาน</button>
+                  <button
+                    onClick={() => setGroupBy("none")}
+                    className={`px-2 py-0.5 rounded transition-all ${
+                      groupBy === "none"
+                        ? "bg-blue-600 text-white"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    ไม่มี
+                  </button>
+                  <button
+                    onClick={() => setGroupBy("type")}
+                    className={`px-2 py-0.5 rounded transition-all ${
+                      groupBy === "type"
+                        ? "bg-blue-600 text-white"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    ประเภท
+                  </button>
+                  <button
+                    onClick={() => setGroupBy("org")}
+                    className={`px-2 py-0.5 rounded transition-all ${
+                      groupBy === "org"
+                        ? "bg-blue-600 text-white"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    หน่วยงาน
+                  </button>
                 </div>
               </div>
 
               {/* Scrollable Device List */}
               <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                 {(() => {
-                  const filtered = nodes.filter((n) => {
-                    const matchesSearch = n.label.toLowerCase().includes(searchTerm.toLowerCase()) || (n.ip ?? "").includes(searchTerm);
+                  const filtered = rawNodes.filter((n) => {
+                    const matchesSearch =
+                      n.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                      (n.ip ?? "").includes(searchTerm);
                     const matchesStatus = statusFilter === "all" || n.status === statusFilter;
                     return matchesSearch && matchesStatus;
                   });
@@ -601,42 +749,58 @@ export default function NetworkMapPage() {
                     );
                   }
 
-                  const renderItem = (n: Node) => (
+                  const renderItem = (n: DeviceNode) => (
                     <div
                       key={n.id}
                       onClick={() => setSelectedNode(n)}
                       className="p-3 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-blue-500/30 dark:hover:border-blue-500/30 bg-slate-50/50 dark:bg-slate-800/20 hover:bg-blue-50/20 dark:hover:bg-blue-900/10 cursor-pointer transition-all flex items-center justify-between gap-2"
                     >
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{n.label}</p>
-                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">{n.ip ?? "No IP"}</p>
+                        <p className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate">
+                          {n.label}
+                        </p>
+                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          {n.ip ?? "No IP"}
+                        </p>
                       </div>
-                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${n.status === "up" ? "bg-emerald-500" : "bg-red-500"}`} />
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                          n.status === "up" ? "bg-emerald-500" : "bg-rose-500"
+                        }`}
+                      />
                     </div>
                   );
 
                   if (groupBy === "type") {
-                    const coreNodes = filtered.filter(n => n.type === 'core');
-                    const distNodes = filtered.filter(n => n.type === 'distribution');
-                    const accessNodes = filtered.filter(n => n.type === 'access' || n.type === 'server');
+                    const coreNodes = filtered.filter((n) => n.type === "core");
+                    const distNodes = filtered.filter((n) => n.type === "distribution");
+                    const accessNodes = filtered.filter(
+                      (n) => n.type === "access" || n.type === "server"
+                    );
 
                     return (
                       <div className="space-y-4">
                         {coreNodes.length > 0 && (
                           <div>
-                            <h4 className="text-[10px] font-extrabold uppercase text-blue-500 dark:text-blue-400 border-b border-slate-100 dark:border-slate-800 pb-1 mb-2">Core Layer ({coreNodes.length})</h4>
+                            <h4 className="text-[10px] font-extrabold uppercase text-blue-500 dark:text-blue-400 border-b border-slate-100 dark:border-slate-800 pb-1 mb-2">
+                              Core Layer ({coreNodes.length})
+                            </h4>
                             <div className="space-y-2">{coreNodes.map(renderItem)}</div>
                           </div>
                         )}
                         {distNodes.length > 0 && (
                           <div>
-                            <h4 className="text-[10px] font-extrabold uppercase text-purple-500 dark:text-purple-400 border-b border-slate-100 dark:border-slate-800 pb-1 mb-2">Distribution Layer ({distNodes.length})</h4>
+                            <h4 className="text-[10px] font-extrabold uppercase text-purple-500 dark:text-purple-400 border-b border-slate-100 dark:border-slate-800 pb-1 mb-2">
+                              Distribution Layer ({distNodes.length})
+                            </h4>
                             <div className="space-y-2">{distNodes.map(renderItem)}</div>
                           </div>
                         )}
                         {accessNodes.length > 0 && (
                           <div>
-                            <h4 className="text-[10px] font-extrabold uppercase text-teal-500 dark:text-teal-400 border-b border-slate-100 dark:border-slate-800 pb-1 mb-2">Access Layer ({accessNodes.length})</h4>
+                            <h4 className="text-[10px] font-extrabold uppercase text-teal-500 dark:text-teal-400 border-b border-slate-100 dark:border-slate-800 pb-1 mb-2">
+                              Access Layer ({accessNodes.length})
+                            </h4>
                             <div className="space-y-2">{accessNodes.map(renderItem)}</div>
                           </div>
                         )}
@@ -645,8 +809,8 @@ export default function NetworkMapPage() {
                   }
 
                   if (groupBy === "org") {
-                    const orgGroups = new Map<string, Node[]>();
-                    filtered.forEach(n => {
+                    const orgGroups = new Map<string, DeviceNode[]>();
+                    filtered.forEach((n) => {
                       const key = n.organization ?? "ไม่ระบุสังกัด (Unassigned)";
                       const list = orgGroups.get(key) ?? [];
                       list.push(n);
@@ -674,7 +838,6 @@ export default function NetworkMapPage() {
                     );
                   }
 
-                  // Flat list (no grouping)
                   return filtered.map(renderItem);
                 })()}
               </div>
@@ -683,5 +846,14 @@ export default function NetworkMapPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Wrap with ReactFlowProvider to enable useReactFlow hooks
+export default function NetworkMapPage() {
+  return (
+    <ReactFlowProvider>
+      <NetworkTopologyFlow />
+    </ReactFlowProvider>
   );
 }
