@@ -139,6 +139,7 @@ export async function processSecurityScorecardUpload(opts: {
           finalUrl: String(row["FINAL URL"] ?? ""),
           headers: String(row["HEADERS"] ?? ""),
           scoreImpact: Number(row["ISSUE TYPE SCORE IMPACT"] ?? 0),
+          createdAt: row["FIRST SEEN"] ? new Date(row["FIRST SEEN"]) : undefined,
           matchedDomain: String(row.matched_domain ?? ""),
           host: (() => {
             const ah = row.asset_host ? String(row.asset_host).trim() : "";

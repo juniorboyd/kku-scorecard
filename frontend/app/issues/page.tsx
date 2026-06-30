@@ -22,7 +22,7 @@ const SSC_FACTORS = [
 ];
 const PAGE_SIZE = 20;
 
-type SortKey = "organization" | "factor" | "issueType" | "severity" | "asset" | "assetType" | "url" | "impact";
+type SortKey = "organization" | "factor" | "issueType" | "severity" | "asset" | "assetType" | "url" | "impact" | "createdAt";
 type SortDir = "asc" | "desc";
 
 type IssueFilters = { organizations: string[]; factors: string[]; severities: string[]; assetTypes: string[] };
@@ -347,19 +347,20 @@ export default function IssuesPage() {
                 <SortableHeader label="Asset Type"   field="assetType"    currentSort={sortBy} currentOrder={sortDir} onSort={handleSort} />
                 <SortableHeader label="URL"          field="url"          currentSort={sortBy} currentOrder={sortDir} onSort={handleSort} />
                 <SortableHeader label="Impact"       field="impact"       currentSort={sortBy} currentOrder={sortDir} onSort={handleSort} align="right" />
+                <SortableHeader label="Time"         field="createdAt"    currentSort={sortBy} currentOrder={sortDir} onSort={handleSort} align="right" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={8} className="px-4 py-3">
+                    <td colSpan={9} className="px-4 py-3">
                       <div className="h-4 bg-gray-100 rounded animate-pulse" />
                     </td>
                   </tr>
                 ))
               ) : issues.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-12 text-gray-400">No issues found</td></tr>
+                <tr><td colSpan={9} className="text-center py-12 text-gray-400">No issues found</td></tr>
               ) : (
                 issues.map((issue: any) => (
                   <tr key={issue.id} className="hover:bg-gray-50">
@@ -393,6 +394,9 @@ export default function IssuesPage() {
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-xs text-gray-600">
                       {issue.scoreImpact?.toFixed(3)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-xs text-gray-500 whitespace-nowrap">
+                      {issue.createdAt ? new Date(issue.createdAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
                     </td>
                   </tr>
                 ))

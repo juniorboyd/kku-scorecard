@@ -171,6 +171,9 @@ export default function FacultyDetailModal({
             <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-slate-900">
               {activeTab === "issues" ? (
                 <div className="space-y-4">
+                  <div className="bg-blue-50/50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl p-3 text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                    <strong>💡 วิธีการคำนวณคะแนน:</strong> ระบบใช้สมการ Exponential Decay <code className="font-mono bg-blue-100 dark:bg-blue-900/50 px-1 py-0.5 rounded mx-1">100 × e^(-ผลรวมแต้มลดทอน/150)</code> เพื่อลดทอนคะแนนอย่างสมดุล (ไม่ใช่การนำแต้มมาลบออกจาก 100 โดยตรง)
+                  </div>
                   {loadingIssues ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center opacity-60">
                       <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-2" />
@@ -193,7 +196,7 @@ export default function FacultyDetailModal({
                           <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100">{issue.issueTypeTitle || issue.title || issue.name}</h4>
                           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{issue.finalUrl || issue.host || issue.desc || issue.detail}</p>
                           {issue.scoreImpact !== undefined && (
-                            <p className="text-[10px] text-red-500 font-bold mt-1">คะแนนหัก: -{issue.scoreImpact.toFixed(3)}</p>
+                            <p className="text-[10px] text-red-500 font-bold mt-1">แต้มลดทอน (Impact): {issue.scoreImpact.toFixed(3)}</p>
                           )}
                         </div>
                       </div>

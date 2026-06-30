@@ -185,6 +185,7 @@ function buildIssueOrderBy(sortBy: string, sortOrder?: string): any[] {
     asset: "host",
     assetType: "assetType",
     url: "finalUrl",
+    createdAt: "createdAt",
   };
   const field = fieldMap[sortBy] ?? "organizationName";
   return [{ [field]: dir }, { organizationName: "asc" }];

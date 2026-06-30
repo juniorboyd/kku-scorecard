@@ -72,6 +72,7 @@ export async function exportIssuesHandler(req: Request, res: Response) {
       { key: "finalUrl", header: "URL" },
       { key: "headers", header: "Headers" },
       { key: "scoreImpact", header: "Impact" },
+      { key: "createdAt", header: "Time" },
     ];
     const date = new Date().toISOString().split("T")[0];
     res.set("Content-Type", "text/csv; charset=utf-8");

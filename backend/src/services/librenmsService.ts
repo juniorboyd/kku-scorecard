@@ -22,6 +22,30 @@ export interface NetworkTopology {
   links: NetworkLink[];
 }
 
+const FACULTIES = [
+  { code: "MED", th: "คณะแพทยศาสตร์", colorClass: "bg-red-500" },
+  { code: "ENG", th: "คณะวิศวกรรมศาสตร์", colorClass: "bg-orange-500" },
+  { code: "SCI", th: "คณะวิทยาศาสตร์", colorClass: "bg-yellow-500" },
+  { code: "ED", th: "คณะศึกษาศาสตร์", colorClass: "bg-orange-500" },
+  { code: "GS", th: "บัณฑิตวิทยาลัย", colorClass: "bg-teal-500" },
+  { code: "HUSO", th: "คณะมนุษยศาสตร์และสังคมศาสตร์", colorClass: "bg-purple-500" },
+  { code: "KKBS", th: "คณะบริหารธุรกิจและการบัญชี", colorClass: "bg-blue-500" },
+  { code: "AMS", th: "คณะเทคนิคการแพทย์", colorClass: "bg-pink-500" },
+  { code: "ECON", th: "คณะเศรษฐศาสตร์", colorClass: "bg-lime-500" },
+  { code: "ARCH", th: "คณะสถาปัตยกรรมศาสตร์", colorClass: "bg-emerald-500" },
+  { code: "DENT", th: "คณะทันตแพทยศาสตร์", colorClass: "bg-cyan-500" },
+  { code: "CP", th: "วิทยาลัยการคอมพิวเตอร์", colorClass: "bg-indigo-500" },
+  { code: "IS", th: "คณะสหวิทยาการ มข. (หนองคาย)", colorClass: "bg-blue-500" },
+  { code: "PH", th: "คณะสาธารณสุขศาสตร์", colorClass: "bg-teal-500" },
+  { code: "FA", th: "คณะศิลปกรรมศาสตร์", colorClass: "bg-pink-500" },
+  { code: "PS", th: "คณะเภสัชศาสตร์", colorClass: "bg-red-500" },
+  { code: "AG", th: "คณะเกษตรศาสตร์", colorClass: "bg-green-500" },
+  { code: "LW", th: "คณะนิติศาสตร์", colorClass: "bg-indigo-500" },
+  { code: "TE", th: "คณะเทคโนโลยี", colorClass: "bg-amber-500" },
+  { code: "NU", th: "คณะพยาบาลศาสตร์", colorClass: "bg-cyan-500" },
+  { code: "VM", th: "คณะสัตวแพทยศาสตร์", colorClass: "bg-green-500" }
+];
+
 // Mock data fallback matching KKU structure
 const MOCK_TOPOLOGY: NetworkTopology = (() => {
   const nodes: NetworkNode[] = [
@@ -33,31 +57,7 @@ const MOCK_TOPOLOGY: NetworkTopology = (() => {
     { source: "core-0", target: "core-1", status: "up", utilization: 78 }
   ];
 
-  const faculties = [
-    { code: "MED", th: "คณะแพทยศาสตร์", colorClass: "bg-red-500" },
-    { code: "ENG", th: "คณะวิศวกรรมศาสตร์", colorClass: "bg-orange-500" },
-    { code: "SCI", th: "คณะวิทยาศาสตร์", colorClass: "bg-yellow-500" },
-    { code: "ED", th: "คณะศึกษาศาสตร์", colorClass: "bg-orange-500" },
-    { code: "GS", th: "บัณฑิตวิทยาลัย", colorClass: "bg-teal-500" },
-    { code: "HUSO", th: "คณะมนุษยศาสตร์และสังคมศาสตร์", colorClass: "bg-purple-500" },
-    { code: "KKBS", th: "คณะบริหารธุรกิจและการบัญชี", colorClass: "bg-blue-500" },
-    { code: "AMS", th: "คณะเทคนิคการแพทย์", colorClass: "bg-pink-500" },
-    { code: "ECON", th: "คณะเศรษฐศาสตร์", colorClass: "bg-lime-500" },
-    { code: "ARCH", th: "คณะสถาปัตยกรรมศาสตร์", colorClass: "bg-emerald-500" },
-    { code: "DENT", th: "คณะทันตแพทยศาสตร์", colorClass: "bg-cyan-500" },
-    { code: "CP", th: "วิทยาลัยการคอมพิวเตอร์", colorClass: "bg-indigo-500" },
-    { code: "IS", th: "คณะสหวิทยาการ มข. (หนองคาย)", colorClass: "bg-blue-500" },
-    { code: "PH", th: "คณะสาธารณสุขศาสตร์", colorClass: "bg-teal-500" },
-    { code: "FA", th: "คณะศิลปกรรมศาสตร์", colorClass: "bg-pink-500" },
-    { code: "PS", th: "คณะเภสัชศาสตร์", colorClass: "bg-red-500" },
-    { code: "AG", th: "คณะเกษตรศาสตร์", colorClass: "bg-green-500" },
-    { code: "LW", th: "คณะนิติศาสตร์", colorClass: "bg-indigo-500" },
-    { code: "TE", th: "คณะเทคโนโลยี", colorClass: "bg-amber-500" },
-    { code: "NU", th: "คณะพยาบาลศาสตร์", colorClass: "bg-cyan-500" },
-    { code: "VM", th: "คณะสัตวแพทยศาสตร์", colorClass: "bg-green-500" }
-  ];
-
-  faculties.forEach((f, i) => {
+  FACULTIES.forEach((f, i) => {
     const distId = `dist-${f.code.toLowerCase()}`;
     const accId1 = `acc-${f.code.toLowerCase()}-01`;
     const accId2 = `acc-${f.code.toLowerCase()}-02`;
@@ -260,10 +260,13 @@ export async function getNetworkTopology(): Promise<NetworkTopology> {
         if (!distId) {
           distId = `dist-${index}`;
           distNodes.set(org, distId);
+          const fac = FACULTIES.find(f => f.th === org);
+          const shortCode = fac ? fac.code.toLowerCase() : "unknown";
+
           // Create distribution node for this org
           nodes.push({
             id: distId,
-            label: `sw-dist-${org.substring(4, 8)}-01.kku.ac.th`,
+            label: `sw-dist-${shortCode}-01.kku.ac.th`,
             type: "distribution",
             status: "up",
             organization: org
